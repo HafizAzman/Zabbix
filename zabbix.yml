@@ -1,0 +1,102 @@
+---
+- hosts: all
+  tasks:
+ 
+    - name: Install Zabbix Repository Key
+      rpm_key: state=present key=http://repo.zabbix.com/RPM-GPG-KEY-ZABBIX 
+      become: true
+
+    - name: Install Zabbix Repository and other packages needed by Ansible
+      yum: pkg={{item}} state=installed  
+      with_items:
+        - policycoreutils-python
+        - libselinux-python
+        - MySQL-python
+        - https://repo.zabbix.com/zabbix/3.4/rhel/7/x86_64/zabbix-release-3.4-2.el7.noarch.rpm
+      become: true
+
+    - name: Install MariaDB packages
+      yum: pkg={{item}} state=installed
+      with_items:
+        - mariadb-server
+      become: true
+     
+    - name: Install Zabbix packages
+      yum: pkg={{item}} state=installed
+      with_items:
+        - zabbix-server-mysql
+        - zabbix-web-mysql
+        - zabbix-agent
+      become: true
+
+    - name: Run MariaDB
+      service: name=mariadb.service enabled=true state=restarted
+      tags: initial
+      become: true
+
+    - name: Create Zabbix Database
+      mysql_db: name=zabbix state=present collation=utf8_bin
+      become: true
+
+    - name: Create Zabbix user and grant permissions
+      mysql_user: name=zabbix password=zabbix priv=zabbix.*:ALL host=localhost state=present
+      become: true
+
+    - name: Import initial schema
+      mysql_db: name=zabbix state=import target={{item}}
+      with_items:
+        - /usr/share/doc/zabbix-server-mysql-3.4.12/create.sql.gz
+      ignore_errors: true  
+      become: true
+
+    - name: Zabbix chown /var/log/zabbix
+      raw: chown -R zabbix:zabbix /var/log/zabbix
+      become: true
+
+    - name: Zabbix chown /var/run/zabbix
+      raw: chown -R zabbix:zabbix /var/run/zabbix
+      become: true
+
+    - name: Zabbix chmod /var/log/zabbix/
+      raw:   chmod -R 775 /var/log/zabbix/
+      become: true
+
+    - name: Zabbix chmod /var/run/zabbix/
+      raw: chmod -R 775 /var/run/zabbix/
+      become: true
+
+    - name: Zabbix run agent
+      raw: /usr/sbin/zabbix_agentd -c /etc/zabbix/zabbix_agentd.conf
+      become: true
+ 
+    - name: Open HTTPD service in firewalld  
+      raw: firewall-cmd --permanent --add-service=http
+      become: true
+
+    - name: Open HTTPD service in firewalld  
+      raw: firewall-cmd --reload
+      become: true
+
+    - name: Copy the zabbix_server.conf 
+      template: 
+        src: templates/zabbix_server.conf
+        dest: /etc/zabbix/zabbix_server.conf
+        mode: 0644
+      become: true 
+
+    - name: Copy the zabbix.conf 
+      template: 
+        src: templates/zabbix.conf
+        dest: /etc/httpd/conf.d/zabbix.conf
+        mode: 0644
+      become: true  
+  
+    - name: Run httpd
+      service: name=httpd enabled=true state=restarted
+      become: true
+
+    - name: Restart Zabbix Server
+      service: name=zabbix-server enabled=true state=restarted
+      become: true
+
+
